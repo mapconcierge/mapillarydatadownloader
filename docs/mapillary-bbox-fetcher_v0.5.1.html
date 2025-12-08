@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mapillary BBOX Image Fetcher</title>
+  
+  <!-- MapLibre GL JS CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet" />
+  <!-- MapLibre GL Draw CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-draw@2/dist/maplibre-gl-draw.css" rel="stylesheet" />
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      overflow: hidden;
+    }
+    
+    #map {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 100%;
+    }
+    
+    /* 左上コントロールパネル */
+    .control-panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      z-index: 1;
+      max-width: 320px;
+    }
+    
+    .control-panel input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    
+    .control-panel button {
+      width: 100%;
+      padding: 10px;
+      background: #0066cc;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    
+    .control-panel button:hover {
+      background: #0052a3;
+    }
+    
+    .control-panel button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    
+    /* 右上ダウンロードボタン */
+    .download-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: white;
+      padding: 10px 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      z-index: 1;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+    }
+    
+    .download-btn:hover:not(:disabled) {
+      background: #f0f0f0;
+    }
+    
+    .download-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    /* ローディングスピナー */
+    .spinner-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.3);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    
+    .spinner-overlay.active {
+      display: flex;
+    }
+    
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 5px solid #f3f3f3;
+      border-top: 5px solid #0066cc;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    /* トースト通知 */
+    .toast {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #333;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      z-index: 1001;
+      opacity: 0;
+      transition: opacity 0.3s;
+      max-width: 80%;
+      text-align: center;
+    }
+    
+    .toast.show {
+      opacity: 1;
+    }
+    
+    .toast.error {
+      background: #d32f2f;
+    }
+    
+    .toast.success {
+      background: #388e3c;
+    }
+    
+    /* ポップアップ画像スタイル */
+    .maplibregl-popup-content {
+      padding: 0;
+      max-width: 400px;
+    }
+    
+    .maplibregl-popup-content img {
+      width: 100%;
+      display: block;
+      border-radius: 4px;
+    }
+    
+    /* レスポンシブ対応 */
+    @media (max-width: 480px) {
+      .control-panel {
+        max-width: calc(100% - 20px);
+        font-size: 13px;
+      }
+      
+      .download-btn {
+        font-size: 12px;
+        padding: 8px 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- 地図 -->
+  <div id="map"></div>
+  
+  <!-- 左上コントロールパネル -->
+  <div class="control-panel">
+    <input 
+      type="text" 
+      id="tokenInput" 
+      placeholder="Mapillary Access Tokenを入力"
+      autocomplete="off"
+    />
+    <button id="fetchBtn">BBOXを描いて取得開始</button>
+  </div>
+  
+  <!-- 右上ダウンロードボタン -->
+  <button id="downloadBtn" class="download-btn" disabled>
+    GeoJSONをダウンロード
+  </button>
+  
+  <!-- ローディングスピナー -->
+  <div class="spinner-overlay" id="spinnerOverlay">
+    <div class="spinner"></div>
+  </div>
+  
+  <!-- トースト通知 -->
+  <div class="toast" id="toast"></div>
+  
+  <!-- MapLibre GL JS -->
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4/dist/maplibre-gl.js"></script>
+  <!-- MapLibre GL Draw -->
+  <script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-draw@2/dist/maplibre-gl-draw.js"></script>
+  
+  <script>
+    // グローバル変数
+    let map;
+    let draw;
+    let geojsonData = null;
+    
+    // 地図の初期化
+    function initMap() {
+      map = new maplibregl.Map({
+        container: 'map',
+        style: {
+          version: 8,
+          sources: {
+            'osm': {
+              type: 'raster',
+              tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+              tileSize: 256,
+              attribution: '© OpenStreetMap contributors'
+            }
+          },
+          layers: [{
+            id: 'osm',
+            type: 'raster',
+            source: 'osm',
+            minzoom: 0,
+            maxzoom: 19
+          }]
+        },
+        center: [139.7671, 35.6812], // 東京
+        zoom: 12
+      });
+      
+      // NavigationControlを追加
+      map.addControl(new maplibregl.NavigationControl(), 'top-right');
+      
+      // Drawコントロールの初期化
+      draw = new MapboxDraw({
+        displayControlsDefault: false,
+        controls: {
+          polygon: false,
+          line_string: false,
+          point: false,
+          trash: true
+        },
+        modes: {
+          ...MapboxDraw.modes,
+          draw_rectangle: MapboxDraw.modes.draw_polygon
+        }
+      });
+      
+      map.addControl(draw);
+    }
+    
+    // トースト表示
+    function showToast(message, type = 'info') {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = `toast ${type} show`;
+      
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, 3000);
+    }
+    
+    // ローディング表示切り替え
+    function setLoading(isLoading) {
+      const overlay = document.getElementById('spinnerOverlay');
+      if (isLoading) {
+        overlay.classList.add('active');
+      } else {
+        overlay.classList.remove('active');
+      }
+    }
+    
+    // Mapillary APIからデータ取得（ページネーション対応）
+    async function fetchMapillaryImages(bbox, accessToken) {
+      const allFeatures = [];
+      let url = `https://graph.mapillary.com/images?access_token=${accessToken}&bbox=${bbox}&fields=id,computed_geometry,captured_at,compass_angle,thumb_2048_url&limit=2000`;
+      
+      while (url) {
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+          throw new Error(`API Error: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        // GeoJSON Featureに変換
+        if (data.data && data.data.length > 0) {
+          data.data.forEach(item => {
+            if (item.computed_geometry) {
+              allFeatures.push({
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: item.computed_geometry.coordinates
+                },
+                properties: {
+                  id: item.id,
+                  captured_at: item.captured_at,
+                  thumb_2048_url: item.thumb_2048_url,
+                  compass_angle: item.compass_angle
+                }
+              });
+            }
+          });
+        }
+        
+        // 次のページがあるか確認
+        url = data.paging && data.paging.next ? data.paging.next : null;
+      }
+      
+      return {
+        type: 'FeatureCollection',
+        features: allFeatures
+      };
+    }
+    
+    // 地図上にポイントを表示
+    function displayPointsOnMap(geojson) {
+      // 既存のレイヤーとソースを削除
+      if (map.getLayer('mapillary-points')) {
+        map.removeLayer('mapillary-points');
+      }
+      if (map.getSource('mapillary')) {
+        map.removeSource('mapillary');
+      }
+      
+      // 新しいソースとレイヤーを追加
+      map.addSource('mapillary', {
+        type: 'geojson',
+        data: geojson
+      });
+      
+      map.addLayer({
+        id: 'mapillary-points',
+        type: 'circle',
+        source: 'mapillary',
+        paint: {
+          'circle-radius': 5,
+          'circle-color': '#0066cc',
+          'circle-stroke-width': 1,
+          'circle-stroke-color': '#ffffff'
+        }
+      });
+      
+      // クリックイベント：画像をポップアップ表示
+      map.on('click', 'mapillary-points', (e) => {
+        const feature = e.features[0];
+        const props = feature.properties;
+        const coords = feature.geometry.coordinates;
+        
+        const html = `
+          <div>
+            <img src="${props.thumb_2048_url}" alt="Mapillary Image" style="max-width: 100%;" />
+            <p style="padding: 8px; margin: 0; font-size: 12px;">
+              <strong>ID:</strong> ${props.id}<br>
+              <strong>撮影日時:</strong> ${new Date(props.captured_at).toLocaleString('ja-JP')}
+            </p>
+          </div>
+        `;
+        
+        new maplibregl.Popup()
+          .setLngLat(coords)
+          .setHTML(html)
+          .addTo(map);
+      });
+      
+      // カーソル変更
+      map.on('mouseenter', 'mapillary-points', () => {
+        map.getCanvas().style.cursor = 'pointer';
+      });
+      
+      map.on('mouseleave', 'mapillary-points', () => {
+        map.getCanvas().style.cursor = '';
+      });
+    }
+    
+    // GeoJSONダウンロード
+    function downloadGeoJSON() {
+      if (!geojsonData) return;
+      
+      const dataStr = JSON.stringify(geojsonData, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const filename = `mapillary_images_${timestamp}.geojson`;
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      
+      URL.revokeObjectURL(url);
+      showToast('GeoJSONをダウンロードしました', 'success');
+    }
+    
+    // 取得開始ボタンのクリックイベント
+    async function handleFetchClick() {
+      const token = document.getElementById('tokenInput').value.trim();
+      
+      if (!token) {
+        showToast('Access Tokenを入力してください', 'error');
+        return;
+      }
+      
+      // Drawで描かれた図形を取得
+      const data = draw.getAll();
+      
+      if (data.features.length === 0) {
+        showToast('地図上でBBOXを描いてください', 'error');
+        
+        // Rectangleモードを有効化
+        draw.changeMode('draw_polygon');
+        return;
+      }
+      
+      // 最後に描いた図形を取得
+      const feature = data.features[data.features.length - 1];
+      const coords = feature.geometry.coordinates[0];
+      
+      // BBOX計算（min_lon, min_lat, max_lon, max_lat）
+      let minLon = coords[0][0];
+      let maxLon = coords[0][0];
+      let minLat = coords[0][1];
+      let maxLat = coords[0][1];
+      
+      coords.forEach(coord => {
+        minLon = Math.min(minLon, coord[0]);
+        maxLon = Math.max(maxLon, coord[0]);
+        minLat = Math.min(minLat, coord[1]);
+        maxLat = Math.max(maxLat, coord[1]);
+      });
+      
+      const bbox = `${minLon},${minLat},${maxLon},${maxLat}`;
+      
+      // データ取得開始
+      setLoading(true);
+      
+      try {
+        const geojson = await fetchMapillaryImages(bbox, token);
+        
+        if (geojson.features.length === 0) {
+          showToast('指定範囲にMapillary画像が見つかりませんでした', 'error');
+        } else {
+          geojsonData = geojson;
+          displayPointsOnMap(geojson);
+          document.getElementById('downloadBtn').disabled = false;
+          showToast(`${geojson.features.length}件の画像を取得しました`, 'success');
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        showToast(`エラーが発生しました: ${error.message}`, 'error');
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    // イベントリスナー設定
+    document.getElementById('fetchBtn').addEventListener('click', handleFetchClick);
+    document.getElementById('downloadBtn').addEventListener('click', downloadGeoJSON);
+    
+    // 地図初期化
+    initMap();
+  </script>
+</body>
+</html>
