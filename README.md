@@ -7,7 +7,7 @@ A web-based tool to fetch and visualize Mapillary street-level imagery within a 
 
 ## 🌐 Demo
 
-[Launch Application](https://YOUR_USERNAME.github.io/YOUR_REPOSITORY_NAME/)
+[on GitHub Pages](https://mapconcierge.github.io/mapillarydatadownloader/)
 
 ## ✨ Features
 
