@@ -2,6 +2,9 @@
 
 A web-based tool to fetch and visualize Mapillary street-level imagery within a specified bounding box.
 
+<img width="1512" height="792" alt="Image" src="https://github.com/user-attachments/assets/2cc76de8-96f3-4d47-aaf3-deeb5a9966b2" />
+
+
 ## 🌐 Demo
 
 [Launch Application](https://YOUR_USERNAME.github.io/YOUR_REPOSITORY_NAME/)
